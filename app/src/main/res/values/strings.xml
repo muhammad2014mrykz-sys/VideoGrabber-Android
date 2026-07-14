@@ -1,0 +1,22 @@
+<resources>
+    <string name="app_name">VideoGrabber</string>
+    <string name="title">محمّل الفيديوهات</string>
+    <string name="subtitle">حمّل من أي منصة — يوتيوب، تيك توك، تويتر، فيسبوك، إنستجرام وأكثر</string>
+    <string name="url_hint">الصق رابط الفيديو هنا…</string>
+    <string name="paste">لصق</string>
+    <string name="fetch">جلب المعلومات</string>
+    <string name="download">تحميل</string>
+    <string name="cancel">إلغاء</string>
+    <string name="quality">الجودة</string>
+    <string name="best_auto">الأعلى تلقائياً</string>
+    <string name="audio_only">صوت فقط (MP3)</string>
+    <string name="preparing">جارٍ التحضير…</string>
+    <string name="fetching">جارٍ جلب المعلومات…</string>
+    <string name="downloading">جارٍ التحميل…</string>
+    <string name="done">تم الحفظ في مجلد التنزيلات ✓</string>
+    <string name="ready">جاهز</string>
+    <string name="channel_name">تنزيلات الفيديو</string>
+    <string name="notif_downloading">جارٍ تحميل الفيديو</string>
+    <string name="engine_updating">جارٍ تحديث المحرّك…</string>
+    <string name="err_generic">حدث خطأ. تأكد من الرابط والاتصال ثم أعد المحاولة.</string>
+</resources>
