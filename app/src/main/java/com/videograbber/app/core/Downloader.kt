@@ -20,7 +20,9 @@ import java.util.concurrent.atomic.AtomicBoolean
 object Downloader {
 
     private val initialized = AtomicBoolean(false)
+    private val updated = AtomicBoolean(false)
     private val initMutex = Mutex()
+    private val updateMutex = Mutex()
 
     /** Initialise the bundled python/yt-dlp/ffmpeg once. Idempotent. */
     suspend fun ensureInit(context: Context) = withContext(Dispatchers.IO) {
@@ -33,15 +35,26 @@ object Downloader {
         }
     }
 
-    /** Best-effort keep yt-dlp current so new/changed sites keep working. */
-    suspend fun updateEngine(context: Context) = withContext(Dispatchers.IO) {
-        runCatching { YoutubeDL.getInstance().updateYoutubeDL(context) }
+    /**
+     * Init + (once per app process) update yt-dlp to the latest release.
+     * The library's bundled yt-dlp is old; refreshing it is what keeps every
+     * platform working. Best-effort: if offline, we proceed with what we have.
+     * Concurrent callers wait here so the first probe uses the fresh engine.
+     */
+    suspend fun ensureReady(context: Context) = withContext(Dispatchers.IO) {
+        ensureInit(context)
+        if (updated.get()) return@withContext
+        updateMutex.withLock {
+            if (updated.get()) return@withLock
+            runCatching { YoutubeDL.getInstance().updateYoutubeDL(context) }
+            updated.set(true)
+        }
     }
 
     /** Probe a URL for title, thumbnail and available formats. */
     suspend fun getInfo(context: Context, url: String): VideoInfo =
         withContext(Dispatchers.IO) {
-            ensureInit(context)
+            ensureReady(context)
             val request = YoutubeDLRequest(url).apply {
                 addOption("--no-playlist")
             }
@@ -65,7 +78,7 @@ object Downloader {
         processId: String,
         onProgress: (Float, String) -> Unit,
     ): File = withContext(Dispatchers.IO) {
-        ensureInit(context)
+        ensureReady(context)
 
         val outDir = File(
             context.getExternalFilesDir(Environment.DIRECTORY_MOVIES),

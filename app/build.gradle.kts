@@ -59,7 +59,11 @@ android {
 
 dependencies {
     // --- yt-dlp + ffmpeg engine for Android (the core downloader) ---
-    val ytdlp = "0.17.4"
+    // 0.15.0 is the newest youtubedl-android release that builds cleanly on
+    // JitPack (0.16+ JitPack builds are broken upstream). Its bundled yt-dlp
+    // is old, so the app updates yt-dlp to the latest release at startup
+    // (see Downloader.ensureReady / updateEngine).
+    val ytdlp = "0.15.0"
     implementation("com.github.yausername.youtubedl-android:library:$ytdlp")
     implementation("com.github.yausername.youtubedl-android:ffmpeg:$ytdlp")
 

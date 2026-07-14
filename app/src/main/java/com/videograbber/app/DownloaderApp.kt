@@ -17,10 +17,11 @@ class DownloaderApp : Application() {
     override fun onCreate() {
         super.onCreate()
         createNotificationChannel()
-        // Warm up the yt-dlp / ffmpeg engine in the background so the first
-        // download is instant. Safe to call again later (idempotent).
+        // Warm up the yt-dlp / ffmpeg engine in the background (and update
+        // yt-dlp to the latest release) so the first download is fast and
+        // every platform works. Safe to call again later (idempotent).
         appScope.launch {
-            runCatching { Downloader.ensureInit(this@DownloaderApp) }
+            runCatching { Downloader.ensureReady(this@DownloaderApp) }
         }
     }
 
