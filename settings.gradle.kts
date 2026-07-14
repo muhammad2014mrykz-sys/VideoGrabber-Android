@@ -15,9 +15,9 @@ dependencyResolutionManagement {
     repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
     repositories {
         google()
+        // youtubedl-android (yt-dlp + ffmpeg for Android) is published on
+        // Maven Central under the io.github.junkfood02 group.
         mavenCentral()
-        // youtubedl-android (yt-dlp + ffmpeg for Android) is published on JitPack
-        maven { url = uri("https://jitpack.io") }
     }
 }
 

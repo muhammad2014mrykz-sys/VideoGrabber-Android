@@ -120,7 +120,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     private fun friendlyError(msg: String?): String {
         val m = (msg ?: "").lowercase()
-        return when {
+        val hint = when {
             "private" in m || "login" in m || "sign in" in m ->
                 "هذا المحتوى خاص أو يتطلب تسجيل دخول."
             "unsupported url" in m || "unable to extract" in m ->
@@ -128,5 +128,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             "unavailable" in m -> "الفيديو غير متاح."
             else -> "تعذّر جلب المعلومات — تأكد من الرابط والاتصال."
         }
+        // Surface the real underlying error too, so problems are diagnosable.
+        val detail = msg?.trim()?.takeIf { it.isNotEmpty() }?.take(300)
+        return if (detail != null) "$hint\n\nالتفاصيل:\n$detail" else hint
     }
 }

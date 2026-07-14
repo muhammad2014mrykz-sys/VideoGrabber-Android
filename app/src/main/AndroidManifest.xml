@@ -21,6 +21,7 @@
         android:supportsRtl="true"
         android:theme="@style/Theme.VideoGrabber"
         android:usesCleartextTraffic="true"
+        android:extractNativeLibs="true"
         tools:targetApi="31">
 
         <activity

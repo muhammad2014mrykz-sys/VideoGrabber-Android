@@ -59,13 +59,14 @@ android {
 
 dependencies {
     // --- yt-dlp + ffmpeg engine for Android (the core downloader) ---
-    // 0.15.0 is the newest youtubedl-android release that builds cleanly on
-    // JitPack (0.16+ JitPack builds are broken upstream). Its bundled yt-dlp
-    // is old, so the app updates yt-dlp to the latest release at startup
-    // (see Downloader.ensureReady / updateEngine).
-    val ytdlp = "0.15.0"
-    implementation("com.github.yausername.youtubedl-android:library:$ytdlp")
-    implementation("com.github.yausername.youtubedl-android:ffmpeg:$ytdlp")
+    // Maven Central fork (io.github.junkfood02) — the maintained distribution
+    // the Seal app uses. 0.18.1 bundles Python 3.12.11 + QuickJS + a recent
+    // yt-dlp, and supports updateYoutubeDL() at runtime. (The old JitPack
+    // coords only had 0.15.0 with Python 3.8, which CANNOT run current yt-dlp
+    // — that was why extraction failed on every site.)
+    val ytdlp = "0.18.1"
+    implementation("io.github.junkfood02.youtubedl-android:library:$ytdlp")
+    implementation("io.github.junkfood02.youtubedl-android:ffmpeg:$ytdlp")
 
     // --- Jetpack Compose UI ---
     val composeBom = platform("androidx.compose:compose-bom:2024.09.03")
