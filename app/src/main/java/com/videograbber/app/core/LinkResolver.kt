@@ -41,14 +41,64 @@ object LinkResolver {
         "apptype", "timestamp", "language",
     )
 
-    /** Return the first clean, downloadable URL in [raw], or null if none. */
+    // Hosts that carry actual videos — preferred when several links are present.
+    private val VIDEO_HOSTS = listOf(
+        "kwai.com", "kwai.net", "kuaishou", "gifshow.com",
+        "youtube.com", "youtu.be", "tiktok.com",
+        "instagram.com", "instagr.am", "facebook.com", "fb.watch", "fb.com",
+        "twitter.com", "x.com", "t.co", "snapchat.com",
+        "pinterest.", "pin.it", "reddit.com", "redd.it",
+        "twitch.tv", "dailymotion.com", "vimeo.com",
+    )
+
+    // App-store / app-download / attribution links that ride along in share
+    // templates (e.g. "download the Kwai app") — never the video the user wants.
+    private val BAD_HOSTS = listOf(
+        "play.google.com", "apps.apple.com", "itunes.apple.com",
+        "kwai-app", "onelink.me", "app.link", "adjust.com", "appsflyer",
+        "s.kw.ai/app", "bit.ly/kwai",
+    )
+
+    // Path shapes that indicate a specific video rather than a homepage.
+    private val VIDEO_PATH = Regex(
+        "/(p|video|watch|reel|reels|status|shorts|v|embed|photo)/|/@",
+        RegexOption.IGNORE_CASE
+    )
+
+    /**
+     * Return the best downloadable video URL in [raw], or null if none.
+     * Share text often contains a promo sentence + the video link + extra
+     * links (app-store, "download our app"), so we extract ALL links and pick
+     * the one most likely to be the actual video — not merely the first.
+     */
     fun clean(raw: String?): String? {
         if (raw.isNullOrBlank()) return null
-        val text = INVISIBLE.replace(raw, "")
+        val candidates = extractAll(raw)
+        if (candidates.isEmpty()) return null
+        // Highest score wins; ties keep the earliest (extractAll preserves order).
+        return candidates.maxByOrNull { score(it) }
+    }
 
-        URL.find(text)?.let { return normalize(it.value) }
-        BARE.find(text)?.let { return normalize("https://" + it.value) }
-        return null
+    private fun extractAll(raw: String): List<String> {
+        val text = INVISIBLE.replace(raw, "")
+        val urls = URL.findAll(text).map { normalize(it.value) }.toMutableList()
+        if (urls.isEmpty()) {
+            BARE.findAll(text).forEach { urls.add(normalize("https://" + it.value)) }
+        }
+        return urls.filter { it.length > "https://a.bc".length }.distinct()
+    }
+
+    private fun host(url: String): String =
+        Regex("https?://([^/?#]+)", RegexOption.IGNORE_CASE)
+            .find(url)?.groupValues?.get(1)?.lowercase() ?: ""
+
+    private fun score(url: String): Int {
+        val h = host(url)
+        var s = 0
+        if (BAD_HOSTS.any { it in url.lowercase() }) s -= 100
+        if (VIDEO_HOSTS.any { it in h }) s += 50
+        if (VIDEO_PATH.containsMatchIn(url)) s += 40
+        return s
     }
 
     private fun normalize(rawUrl: String): String {
