@@ -10,16 +10,13 @@ import java.net.URL
 import java.util.zip.GZIPInputStream
 
 /**
- * Dedicated Kwai extractor.
+ * Kwai extractor.
  *
- * yt-dlp has no Kwai extractor and Kwai pages expose no og:video / JSON-LD /
- * <video> tag — the MP4 URL is buried in the page's JavaScript state — so the
- * generic extractor can't get it. This module fetches the share page with a
- * mobile User-Agent (following the k.kwai.com -> m.kwaiapps.com -> www.kwai.com
- * redirect chain), scrapes the direct MP4, and streams it.
- *
- * The MP4 URL is signed and expires after a few hours, so we always re-extract
- * immediately before downloading.
+ * yt-dlp can't do Kwai, and Kwai's international site hides the real video
+ * behind a signed API — the share page HTML is only a recommendation feed.
+ * So the actual video URL is captured by rendering the page in a WebView
+ * (see [KwaiWebExtractor]); this module resolves the share link to its
+ * canonical page + ids, drives the WebView, and streams the resulting mp4.
  */
 object KwaiExtractor {
 
@@ -34,47 +31,64 @@ object KwaiExtractor {
         return HOSTS.any { it in u }
     }
 
-    data class KwaiVideo(
-        val pageUrl: String,
+    data class KwaiMeta(
+        val canonicalUrl: String,
+        val photoId: String?,
+        val userId: String?,
         val title: String,
         val thumbnail: String?,
-        val mp4Url: String,
     )
 
-    suspend fun extract(url: String): KwaiVideo = withContext(Dispatchers.IO) {
-        val (finalUrl, html) = fetchPage(url)
-        val mp4 = findMp4(html) ?: throw RuntimeException(
-            "لم أعثر على رابط الفيديو في صفحة كواي (قد يكون خاصاً أو محذوفاً)."
+    /** Follow the short-link redirects (HTTP works) and read the ids + og tags. */
+    suspend fun probe(url: String): KwaiMeta = withContext(Dispatchers.IO) {
+        val conn = open(url, null)
+        val (finalUrl, html) = try {
+            conn.url.toString() to readBody(conn)
+        } finally {
+            conn.disconnect()
+        }
+        val photoId = Regex("[?&]photoId=(\\d+)").find(finalUrl)?.groupValues?.get(1)
+            ?: Regex("/video/(\\d+)").find(finalUrl)?.groupValues?.get(1)
+        val userId = Regex("[?&]userId=(\\d+)").find(finalUrl)?.groupValues?.get(1)
+        val ogTitle = Regex("property=\"og:title\"\\s+content=\"([^\"]*)\"")
+            .find(html)?.groupValues?.get(1)?.let { decodeHtml(it).trim() }
+        val ogImage = Regex("property=\"og:image\"\\s+content=\"([^\"]*)\"")
+            .find(html)?.groupValues?.get(1)?.let { decodeHtml(it) }
+        KwaiMeta(
+            canonicalUrl = finalUrl,
+            photoId = photoId,
+            userId = userId,
+            title = "فيديو كواي" + (photoId?.let { " • $it" } ?: ""),
+            thumbnail = ogImage,
         )
-        KwaiVideo(finalUrl, findTitle(html), findThumb(html), mp4)
     }
 
+    /** Resolve the correct video (via WebView) and stream it to a file. */
     suspend fun download(
         context: Context,
         url: String,
         onProgress: (Float, String) -> Unit,
         isCancelled: () -> Boolean,
-    ): File = withContext(Dispatchers.IO) {
-        val v = extract(url)                      // fresh, unexpired signed URL
-        val outDir = File(
-            context.getExternalFilesDir(Environment.DIRECTORY_MOVIES), "VideoGrabber"
-        ).apply { mkdirs() }
-        // Kwai's og:title is a generic tagline shared by all videos, so append
-        // the numeric photo id to keep filenames unique.
-        val id = Regex("/video/(\\d+)").find(v.pageUrl)?.groupValues?.get(1)
-            ?: Regex("photoId=(\\d+)").find(v.pageUrl)?.groupValues?.get(1)
-            ?: ""
-        val base = safeName(v.title)
-        val fname = if (id.isNotEmpty()) "${base}_$id.mp4" else "$base.mp4"
-        val file = File(outDir, fname)
-        streamTo(v.mp4Url, v.pageUrl, file, onProgress, isCancelled)
-        file
+    ): File {
+        val meta = probe(url)
+        onProgress(0f, "kwai: resolving")
+        val mp4 = KwaiWebExtractor.resolveMp4(context, meta.canonicalUrl, meta.userId)
+
+        return withContext(Dispatchers.IO) {
+            val outDir = File(
+                context.getExternalFilesDir(Environment.DIRECTORY_MOVIES), "VideoGrabber"
+            ).apply { mkdirs() }
+            val id = meta.photoId ?: System.currentTimeMillis().toString()
+            val file = File(outDir, "kwai_$id.mp4")
+            streamTo(mp4, meta.canonicalUrl, file, onProgress, isCancelled)
+            file
+        }
     }
 
-    // -- networking ------------------------------------------------------- //
+    // -- networking helpers ---------------------------------------------- //
     private fun open(urlStr: String, referer: String?): HttpURLConnection {
         val conn = URL(urlStr).openConnection() as HttpURLConnection
-        conn.instanceFollowRedirects = true       // follows the https redirect chain
+        conn.instanceFollowRedirects = true
         conn.connectTimeout = 20000
         conn.readTimeout = 30000
         conn.setRequestProperty("User-Agent", UA)
@@ -82,16 +96,6 @@ object KwaiExtractor {
         conn.setRequestProperty("Accept-Encoding", "gzip")
         if (referer != null) conn.setRequestProperty("Referer", referer)
         return conn
-    }
-
-    private fun fetchPage(url: String): Pair<String, String> {
-        val conn = open(url, null)
-        try {
-            val body = readBody(conn)
-            return conn.url.toString() to body
-        } finally {
-            conn.disconnect()
-        }
     }
 
     private fun readBody(conn: HttpURLConnection): String {
@@ -121,8 +125,7 @@ object KwaiExtractor {
                         if (n < 0) break
                         output.write(buf, 0, n)
                         done += n
-                        val pct = if (total > 0) done * 100f / total else 0f
-                        onProgress(pct, "kwai")
+                        onProgress(if (total > 0) done * 100f / total else 0f, "kwai")
                     }
                 }
             }
@@ -131,52 +134,7 @@ object KwaiExtractor {
         }
     }
 
-    // -- scraping --------------------------------------------------------- //
-    private fun unescape(s: String): String =
-        s.replace("\\u002F", "/").replace("\\u002f", "/")
-            .replace("\\/", "/").replace("\\u0026", "&")
-
-    private val MP4_PATTERNS = listOf(
-        Regex("\"srcNoMark\":\"(https?[^\"]+?\\.mp4[^\"]*)\""),
-        Regex("\"main_mv_urls?\":\\[\\{\"[^}]*?\"url\":\"(https?[^\"]+?\\.mp4[^\"]*)\""),
-        Regex("\"photoUrl\":\"(https?[^\"]+?\\.mp4[^\"]*)\""),
-        Regex("\"contentUrl\":\"(https?[^\"]+?\\.mp4[^\"]*)\""),
-        // fallback: any mp4 on a kwai CDN host (avoids unrelated media)
-        Regex("(https?://[a-z0-9.-]*kwai[a-z0-9.-]*/[^\"'\\s\\\\]+?\\.mp4[^\"'\\s\\\\]*)",
-            RegexOption.IGNORE_CASE),
-    )
-
-    private fun findMp4(html: String): String? {
-        val h = unescape(html)
-        for (p in MP4_PATTERNS) p.find(h)?.let { return unescape(it.groupValues[1]) }
-        return null
-    }
-
-    private fun findTitle(html: String): String {
-        Regex("property=\"og:title\"\\s+content=\"([^\"]*)\"").find(html)?.let {
-            val t = decodeHtml(it.groupValues[1]).trim()
-            if (t.isNotEmpty()) return t
-        }
-        Regex("<title>([^<]*)</title>").find(html)?.let {
-            val t = decodeHtml(it.groupValues[1]).trim()
-            if (t.isNotEmpty()) return t
-        }
-        return "kwai_video"
-    }
-
-    private fun findThumb(html: String): String? {
-        Regex("property=\"og:image\"\\s+content=\"([^\"]*)\"").find(html)?.let {
-            return decodeHtml(it.groupValues[1])
-        }
-        return null
-    }
-
     private fun decodeHtml(s: String): String =
         s.replace("&amp;", "&").replace("&quot;", "\"").replace("&#39;", "'")
             .replace("&lt;", "<").replace("&gt;", ">").replace("&nbsp;", " ")
-
-    private fun safeName(name: String): String {
-        val cleaned = name.replace(Regex("[<>:\"/\\\\|?*\\x00-\\x1f]"), "_").trim()
-        return (if (cleaned.isEmpty()) "kwai_video" else cleaned).take(120)
-    }
 }

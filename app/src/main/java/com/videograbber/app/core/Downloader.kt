@@ -63,9 +63,9 @@ object Downloader {
     /** Probe a URL for title, thumbnail and available formats. */
     suspend fun getInfo(context: Context, url: String): MediaInfo =
         withContext(Dispatchers.IO) {
-            // Kwai: yt-dlp can't extract it — use the dedicated scraper.
+            // Kwai: yt-dlp can't extract it — use the dedicated WebView path.
             if (KwaiExtractor.isKwai(url)) {
-                val v = KwaiExtractor.extract(url)
+                val v = KwaiExtractor.probe(url)
                 return@withContext MediaInfo(
                     title = v.title,
                     thumbnail = v.thumbnail,
