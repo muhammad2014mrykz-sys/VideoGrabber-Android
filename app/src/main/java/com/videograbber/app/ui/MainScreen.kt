@@ -111,7 +111,7 @@ fun MainScreen(vm: MainViewModel) {
         }
 
         // Info card
-        ui.info?.let { info ->
+        if (ui.hasInfo) {
             Card(
                 colors = CardDefaults.cardColors(
                     containerColor = MaterialTheme.colorScheme.surfaceVariant
@@ -120,9 +120,9 @@ fun MainScreen(vm: MainViewModel) {
                 modifier = Modifier.fillMaxWidth(),
             ) {
                 Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    if (!info.thumbnail.isNullOrBlank()) {
+                    if (!ui.thumbnail.isNullOrBlank()) {
                         AsyncImage(
-                            model = info.thumbnail,
+                            model = ui.thumbnail,
                             contentDescription = null,
                             modifier = Modifier
                                 .fillMaxWidth()
@@ -130,7 +130,7 @@ fun MainScreen(vm: MainViewModel) {
                         )
                     }
                     Text(
-                        info.title ?: "—",
+                        ui.title ?: "—",
                         fontSize = 16.sp,
                         fontWeight = FontWeight.SemiBold,
                         color = MaterialTheme.colorScheme.onSurface,
@@ -143,41 +143,42 @@ fun MainScreen(vm: MainViewModel) {
                 }
             }
 
-            // Quality selector
-            var expanded by remember { mutableStateOf(false) }
-            ExposedDropdownMenuBox(
-                expanded = expanded,
-                onExpandedChange = { if (!ui.audioOnly) expanded = it },
-            ) {
-                OutlinedTextField(
-                    value = ui.qualities.getOrNull(ui.selectedQuality)?.label ?: "الأعلى تلقائياً",
-                    onValueChange = {},
-                    readOnly = true,
-                    enabled = !ui.audioOnly,
-                    label = { Text("الجودة") },
-                    trailingIcon = { Icon(Icons.Default.ArrowDropDown, null) },
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .menuAnchor(),
-                )
-                ExposedDropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
-                    ui.qualities.forEachIndexed { i, q ->
-                        DropdownMenuItem(
-                            text = { Text(q.label) },
-                            onClick = { vm.selectQuality(i); expanded = false },
-                        )
+            // Quality + audio options (hidden for single-stream sources like Kwai)
+            if (!ui.directStream) {
+                var expanded by remember { mutableStateOf(false) }
+                ExposedDropdownMenuBox(
+                    expanded = expanded,
+                    onExpandedChange = { if (!ui.audioOnly) expanded = it },
+                ) {
+                    OutlinedTextField(
+                        value = ui.qualities.getOrNull(ui.selectedQuality)?.label ?: "الأعلى تلقائياً",
+                        onValueChange = {},
+                        readOnly = true,
+                        enabled = !ui.audioOnly,
+                        label = { Text("الجودة") },
+                        trailingIcon = { Icon(Icons.Default.ArrowDropDown, null) },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .menuAnchor(),
+                    )
+                    ExposedDropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+                        ui.qualities.forEachIndexed { i, q ->
+                            DropdownMenuItem(
+                                text = { Text(q.label) },
+                                onClick = { vm.selectQuality(i); expanded = false },
+                            )
+                        }
                     }
                 }
-            }
 
-            // Audio-only toggle
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween,
-            ) {
-                Text("صوت فقط (MP3)", color = MaterialTheme.colorScheme.onBackground)
-                Switch(checked = ui.audioOnly, onCheckedChange = vm::setAudioOnly)
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                ) {
+                    Text("صوت فقط (MP3)", color = MaterialTheme.colorScheme.onBackground)
+                    Switch(checked = ui.audioOnly, onCheckedChange = vm::setAudioOnly)
+                }
             }
 
             DownloadSection(dl = dl, vm = vm, context = context)

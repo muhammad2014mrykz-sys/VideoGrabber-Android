@@ -17,12 +17,21 @@ import java.util.concurrent.atomic.AtomicBoolean
  * UI-agnostic wrapper around youtubedl-android (bundled yt-dlp + ffmpeg).
  * Handles engine init, metadata probing, and downloading with progress.
  */
+/** Platform-neutral probe result (works for both yt-dlp and the Kwai path). */
+data class MediaInfo(
+    val title: String,
+    val thumbnail: String?,
+    val heights: List<Int>,     // available video heights; empty = single/best only
+    val directStream: Boolean,  // e.g. Kwai — custom downloader, no quality choice
+)
+
 object Downloader {
 
     private val initialized = AtomicBoolean(false)
     private val updated = AtomicBoolean(false)
     private val initMutex = Mutex()
     private val updateMutex = Mutex()
+    private val cancelledIds = java.util.Collections.synchronizedSet(mutableSetOf<String>())
 
     /** Initialise the bundled python/yt-dlp/ffmpeg once. Idempotent. */
     suspend fun ensureInit(context: Context) = withContext(Dispatchers.IO) {
@@ -52,13 +61,32 @@ object Downloader {
     }
 
     /** Probe a URL for title, thumbnail and available formats. */
-    suspend fun getInfo(context: Context, url: String): VideoInfo =
+    suspend fun getInfo(context: Context, url: String): MediaInfo =
         withContext(Dispatchers.IO) {
-            ensureReady(context)
-            val request = YoutubeDLRequest(url).apply {
-                addOption("--no-playlist")
+            // Kwai: yt-dlp can't extract it — use the dedicated scraper.
+            if (KwaiExtractor.isKwai(url)) {
+                val v = KwaiExtractor.extract(url)
+                return@withContext MediaInfo(
+                    title = v.title,
+                    thumbnail = v.thumbnail,
+                    heights = emptyList(),
+                    directStream = true,
+                )
             }
-            YoutubeDL.getInstance().getInfo(request)
+            ensureReady(context)
+            val request = YoutubeDLRequest(url).apply { addOption("--no-playlist") }
+            val info: VideoInfo = YoutubeDL.getInstance().getInfo(request)
+            val heights = info.formats
+                ?.mapNotNull { fmt -> val h: Int? = fmt.height; if (h != null && h > 0) h else null }
+                ?.distinct()
+                ?.sortedDescending()
+                .orEmpty()
+            MediaInfo(
+                title = info.title ?: "video",
+                thumbnail = info.thumbnail,
+                heights = heights,
+                directStream = false,
+            )
         }
 
     data class Options(
@@ -78,6 +106,14 @@ object Downloader {
         processId: String,
         onProgress: (Float, String) -> Unit,
     ): File = withContext(Dispatchers.IO) {
+        // Kwai: custom scraper + direct stream (yt-dlp can't handle it).
+        if (KwaiExtractor.isKwai(options.url)) {
+            cancelledIds.remove(processId)
+            return@withContext KwaiExtractor.download(
+                context, options.url, onProgress
+            ) { cancelledIds.contains(processId) }
+        }
+
         ensureReady(context)
 
         val outDir = File(
@@ -121,6 +157,7 @@ object Downloader {
     }
 
     fun cancel(processId: String) {
+        cancelledIds.add(processId)   // signals the Kwai stream to stop
         runCatching { YoutubeDL.getInstance().destroyProcessById(processId) }
     }
 }

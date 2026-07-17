@@ -7,7 +7,6 @@ import com.videograbber.app.core.DownloadBus
 import com.videograbber.app.core.Downloader
 import com.videograbber.app.core.LinkResolver
 import com.videograbber.app.service.DownloadService
-import com.yausername.youtubedl_android.mapper.VideoInfo
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -18,8 +17,11 @@ data class QualityOption(val label: String, val maxHeight: Int) // 0 = best
 data class UiState(
     val url: String = "",
     val fetching: Boolean = false,
-    val info: VideoInfo? = null,
+    val hasInfo: Boolean = false,
+    val title: String? = null,
+    val thumbnail: String? = null,
     val platform: String = "",
+    val directStream: Boolean = false, // Kwai etc. — no quality menu
     val qualities: List<QualityOption> = listOf(QualityOption("الأعلى تلقائياً", 0)),
     val selectedQuality: Int = 0,      // index into qualities
     val audioOnly: Boolean = false,
@@ -54,17 +56,9 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch {
             try {
                 val info = Downloader.getInfo(getApplication(), url)
-                val heights = info.formats
-                    ?.mapNotNull { fmt ->
-                        val h: Int? = fmt.height
-                        if (h != null && h > 0) h else null
-                    }
-                    ?.distinct()
-                    ?.sortedDescending()
-                    .orEmpty()
                 val options = buildList {
                     add(QualityOption("الأعلى تلقائياً", 0))
-                    heights.forEach { h ->
+                    info.heights.forEach { h ->
                         val tag = when {
                             h >= 2160 -> " (4K)"
                             h >= 1440 -> " (2K)"
@@ -75,7 +69,10 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 }
                 _ui.value = _ui.value.copy(
                     fetching = false,
-                    info = info,
+                    hasInfo = true,
+                    title = info.title,
+                    thumbnail = info.thumbnail,
+                    directStream = info.directStream,
                     platform = platformFromUrl(url),
                     qualities = options,
                     selectedQuality = 0,
@@ -95,7 +92,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         if (url.isEmpty()) return
         DownloadBus.update(DownloadBus.State.Preparing)
         val maxHeight = s.qualities.getOrNull(s.selectedQuality)?.maxHeight ?: 0
-        val title = s.info?.title ?: "video"
+        val title = s.title ?: "video"
         DownloadService.start(getApplication(), url, s.audioOnly, maxHeight, title)
     }
 
