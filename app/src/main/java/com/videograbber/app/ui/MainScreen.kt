@@ -48,6 +48,7 @@ import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import coil.compose.AsyncImage
 import com.videograbber.app.core.DownloadBus
+import com.videograbber.app.core.LinkResolver
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -86,7 +87,11 @@ fun MainScreen(vm: MainViewModel) {
         )
         Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
             OutlinedButton(
-                onClick = { clipboard.getText()?.let { vm.onUrlChange(it.text.trim()) } },
+                onClick = {
+                    clipboard.getText()?.let {
+                        vm.onUrlChange(LinkResolver.clean(it.text) ?: it.text.trim())
+                    }
+                },
             ) {
                 Icon(Icons.Default.ContentPaste, null, Modifier.size(18.dp))
                 Spacer(Modifier.size(6.dp))

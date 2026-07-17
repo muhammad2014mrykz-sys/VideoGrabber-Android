@@ -14,6 +14,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.videograbber.app.core.LinkResolver
 import com.videograbber.app.ui.MainScreen
 import com.videograbber.app.ui.MainViewModel
 import com.videograbber.app.ui.theme.VideoGrabberTheme
@@ -53,7 +54,7 @@ class MainActivity : ComponentActivity() {
     private fun extractSharedUrl(intent: Intent?): String? {
         if (intent?.action == Intent.ACTION_SEND && intent.type == "text/plain") {
             val text = intent.getStringExtra(Intent.EXTRA_TEXT) ?: return null
-            return Regex("""https?://\S+""").find(text)?.value ?: text.trim()
+            return LinkResolver.clean(text) ?: text.trim()
         }
         return null
     }

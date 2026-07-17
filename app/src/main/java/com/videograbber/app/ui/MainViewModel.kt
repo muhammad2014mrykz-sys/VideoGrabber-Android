@@ -5,6 +5,7 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.videograbber.app.core.DownloadBus
 import com.videograbber.app.core.Downloader
+import com.videograbber.app.core.LinkResolver
 import com.videograbber.app.service.DownloadService
 import com.yausername.youtubedl_android.mapper.VideoInfo
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -45,9 +46,11 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun fetch() {
-        val url = _ui.value.url.trim()
+        // Clean the (often messy) pasted text into one real URL: strips hidden
+        // RTL/zero-width chars, pulls the link out of promo text, drops tracking.
+        val url = LinkResolver.clean(_ui.value.url) ?: _ui.value.url.trim()
         if (url.isEmpty()) return
-        _ui.value = _ui.value.copy(fetching = true, error = null)
+        _ui.value = _ui.value.copy(url = url, fetching = true, error = null)
         viewModelScope.launch {
             try {
                 val info = Downloader.getInfo(getApplication(), url)
@@ -88,7 +91,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     fun startDownload() {
         val s = _ui.value
-        val url = s.url.trim()
+        val url = LinkResolver.clean(s.url) ?: s.url.trim()
         if (url.isEmpty()) return
         DownloadBus.update(DownloadBus.State.Preparing)
         val maxHeight = s.qualities.getOrNull(s.selectedQuality)?.maxHeight ?: 0
