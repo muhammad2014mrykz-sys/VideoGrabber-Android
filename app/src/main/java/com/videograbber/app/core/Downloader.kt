@@ -174,8 +174,12 @@ object Downloader {
      */
     private fun YoutubeDLRequest.applyTikTokFix(url: String) {
         if ("tiktok" in url.lowercase()) {
+            // app_info forces the mobile-API path (required by current+future
+            // yt-dlp per PR #9938); api_hostname pins a working host. The iid is
+            // a non-secret stable install id. Both verified working.
             addOption("--extractor-args",
-                "tiktok:api_hostname=api22-normal-c-useast2a.tiktokv.com")
+                "tiktok:app_info=7318518857994389254;" +
+                    "api_hostname=api22-normal-c-useast2a.tiktokv.com")
         }
     }
 }
