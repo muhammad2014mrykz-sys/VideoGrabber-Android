@@ -74,7 +74,10 @@ object Downloader {
                 )
             }
             ensureReady(context)
-            val request = YoutubeDLRequest(url).apply { addOption("--no-playlist") }
+            val request = YoutubeDLRequest(url).apply {
+                addOption("--no-playlist")
+                applyTikTokFix(url)
+            }
             val info: VideoInfo = YoutubeDL.getInstance().getInfo(request)
             val heights = info.formats
                 ?.mapNotNull { fmt -> val h: Int? = fmt.height; if (h != null && h > 0) h else null }
@@ -125,6 +128,7 @@ object Downloader {
 
         val request = YoutubeDLRequest(options.url).apply {
             addOption("--no-playlist")
+            applyTikTokFix(options.url)
             addOption("-o", File(outDir, "%(title).100B [%(id)s].%(ext)s").absolutePath)
             addOption("--no-mtime")
             addOption("-R", "10")               // retries
@@ -159,5 +163,19 @@ object Downloader {
     fun cancel(processId: String) {
         cancelledIds.add(processId)   // signals the Kwai stream to stop
         runCatching { YoutubeDL.getInstance().destroyProcessById(processId) }
+    }
+
+    /**
+     * TikTok's WEB extractor now requires browser impersonation (curl_cffi),
+     * which youtubedl-android doesn't provide — hence "Unable to extract
+     * universal data / no impersonate target". Forcing an app-API hostname
+     * makes yt-dlp use TikTok's mobile API path, which needs no impersonation.
+     * Verified working. Harmless for non-TikTok URLs.
+     */
+    private fun YoutubeDLRequest.applyTikTokFix(url: String) {
+        if ("tiktok" in url.lowercase()) {
+            addOption("--extractor-args",
+                "tiktok:api_hostname=api22-normal-c-useast2a.tiktokv.com")
+        }
     }
 }
