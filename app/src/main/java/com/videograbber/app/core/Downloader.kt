@@ -63,15 +63,11 @@ object Downloader {
     /** Probe a URL for title, thumbnail and available formats. */
     suspend fun getInfo(context: Context, url: String): MediaInfo =
         withContext(Dispatchers.IO) {
-            // Kwai: yt-dlp can't extract it — use the dedicated WebView path.
+            // Kwai temporarily disabled (its international site hides the video
+            // behind a signed, browser-only API — WebView capture unreliable).
+            // KwaiExtractor / KwaiWebExtractor are kept for future re-enable.
             if (KwaiExtractor.isKwai(url)) {
-                val v = KwaiExtractor.probe(url)
-                return@withContext MediaInfo(
-                    title = v.title,
-                    thumbnail = v.thumbnail,
-                    heights = emptyList(),
-                    directStream = true,
-                )
+                throw RuntimeException("كواي غير مدعوم حالياً في هذا الإصدار.")
             }
             ensureReady(context)
             val request = YoutubeDLRequest(url).apply {
@@ -109,12 +105,9 @@ object Downloader {
         processId: String,
         onProgress: (Float, String) -> Unit,
     ): File = withContext(Dispatchers.IO) {
-        // Kwai: custom scraper + direct stream (yt-dlp can't handle it).
+        // Kwai temporarily disabled (see getInfo).
         if (KwaiExtractor.isKwai(options.url)) {
-            cancelledIds.remove(processId)
-            return@withContext KwaiExtractor.download(
-                context, options.url, onProgress
-            ) { cancelledIds.contains(processId) }
+            throw RuntimeException("كواي غير مدعوم حالياً في هذا الإصدار.")
         }
 
         ensureReady(context)

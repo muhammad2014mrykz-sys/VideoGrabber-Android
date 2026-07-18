@@ -5,6 +5,7 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.videograbber.app.core.DownloadBus
 import com.videograbber.app.core.Downloader
+import com.videograbber.app.core.KwaiExtractor
 import com.videograbber.app.core.LinkResolver
 import com.videograbber.app.service.DownloadService
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -52,6 +53,16 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         // RTL/zero-width chars, pulls the link out of promo text, drops tracking.
         val url = LinkResolver.clean(_ui.value.url) ?: _ui.value.url.trim()
         if (url.isEmpty()) return
+        // Kwai is temporarily unsupported (its international site hides the video
+        // behind a signed, browser-only API). Fail fast with a clear message.
+        if (KwaiExtractor.isKwai(url)) {
+            _ui.value = _ui.value.copy(
+                url = url, fetching = false, hasInfo = false,
+                error = "كواي غير مدعوم حالياً في هذا الإصدار (نعمل عليه). " +
+                    "جرّب يوتيوب، تيك توك، تويتر، فيسبوك أو إنستجرام.",
+            )
+            return
+        }
         _ui.value = _ui.value.copy(url = url, fetching = true, error = null)
         viewModelScope.launch {
             try {
