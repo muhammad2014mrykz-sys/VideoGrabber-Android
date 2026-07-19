@@ -1,8 +1,5 @@
 package com.videograbber.app.ui
 
-import android.content.Context
-import android.content.Intent
-import android.widget.Toast
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -20,7 +17,6 @@ import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material.icons.filled.ContentPaste
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material3.Button
-import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.DropdownMenuItem
@@ -41,7 +37,6 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalClipboardManager
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -55,7 +50,6 @@ import com.videograbber.app.core.LinkResolver
 fun MainScreen(vm: MainViewModel) {
     val ui by vm.ui.collectAsStateWithLifecycle()
     val dl by vm.download.collectAsStateWithLifecycle()
-    val context = LocalContext.current
     val clipboard = LocalClipboardManager.current
 
     Column(
@@ -66,22 +60,21 @@ fun MainScreen(vm: MainViewModel) {
         verticalArrangement = Arrangement.spacedBy(14.dp),
     ) {
         Text(
-            "محمّل الفيديوهات",
-            fontSize = 26.sp,
-            fontWeight = FontWeight.Bold,
+            "Download from any platform",
+            fontSize = 20.sp,
+            fontWeight = FontWeight.SemiBold,
             color = MaterialTheme.colorScheme.onBackground,
         )
         Text(
-            "حمّل من أي منصة — يوتيوب، تيك توك، تويتر، فيسبوك، إنستجرام وأكثر",
+            "YouTube, TikTok, Twitter, Facebook, Instagram and more.",
             fontSize = 13.sp,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
 
-        // URL input
         OutlinedTextField(
             value = ui.url,
             onValueChange = vm::onUrlChange,
-            placeholder = { Text("الصق رابط الفيديو هنا…") },
+            placeholder = { Text("Paste a video link here…") },
             singleLine = true,
             modifier = Modifier.fillMaxWidth(),
         )
@@ -95,14 +88,14 @@ fun MainScreen(vm: MainViewModel) {
             ) {
                 Icon(Icons.Default.ContentPaste, null, Modifier.size(18.dp))
                 Spacer(Modifier.size(6.dp))
-                Text("لصق")
+                Text("Paste")
             }
             Button(
                 onClick = vm::fetch,
                 enabled = !ui.fetching && ui.url.isNotBlank(),
                 modifier = Modifier.weight(1f),
             ) {
-                Text(if (ui.fetching) "جارٍ الجلب…" else "جلب المعلومات")
+                Text(if (ui.fetching) "Fetching…" else "Get info")
             }
         }
 
@@ -110,7 +103,6 @@ fun MainScreen(vm: MainViewModel) {
             Text(it, color = MaterialTheme.colorScheme.error, fontSize = 13.sp)
         }
 
-        // Info card
         if (ui.hasInfo) {
             Card(
                 colors = CardDefaults.cardColors(
@@ -124,9 +116,7 @@ fun MainScreen(vm: MainViewModel) {
                         AsyncImage(
                             model = ui.thumbnail,
                             contentDescription = null,
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .height(180.dp),
+                            modifier = Modifier.fillMaxWidth().height(180.dp),
                         )
                     }
                     Text(
@@ -136,14 +126,13 @@ fun MainScreen(vm: MainViewModel) {
                         color = MaterialTheme.colorScheme.onSurface,
                     )
                     Text(
-                        "المنصة: ${ui.platform}",
+                        "Platform: ${ui.platform}",
                         fontSize = 12.sp,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
             }
 
-            // Quality + audio options (hidden for single-stream sources like Kwai)
             if (!ui.directStream) {
                 var expanded by remember { mutableStateOf(false) }
                 ExposedDropdownMenuBox(
@@ -151,15 +140,13 @@ fun MainScreen(vm: MainViewModel) {
                     onExpandedChange = { if (!ui.audioOnly) expanded = it },
                 ) {
                     OutlinedTextField(
-                        value = ui.qualities.getOrNull(ui.selectedQuality)?.label ?: "الأعلى تلقائياً",
+                        value = ui.qualities.getOrNull(ui.selectedQuality)?.label ?: "Best (auto)",
                         onValueChange = {},
                         readOnly = true,
                         enabled = !ui.audioOnly,
-                        label = { Text("الجودة") },
+                        label = { Text("Quality") },
                         trailingIcon = { Icon(Icons.Default.ArrowDropDown, null) },
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .menuAnchor(),
+                        modifier = Modifier.fillMaxWidth().menuAnchor(),
                     )
                     ExposedDropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
                         ui.qualities.forEachIndexed { i, q ->
@@ -176,22 +163,18 @@ fun MainScreen(vm: MainViewModel) {
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.SpaceBetween,
                 ) {
-                    Text("صوت فقط (MP3)", color = MaterialTheme.colorScheme.onBackground)
+                    Text("Audio only (MP3)", color = MaterialTheme.colorScheme.onBackground)
                     Switch(checked = ui.audioOnly, onCheckedChange = vm::setAudioOnly)
                 }
             }
 
-            DownloadSection(dl = dl, vm = vm, context = context)
+            DownloadSection(dl = dl, vm = vm)
         }
     }
 }
 
 @Composable
-private fun DownloadSection(
-    dl: DownloadBus.State,
-    vm: MainViewModel,
-    context: Context,
-) {
+private fun DownloadSection(dl: DownloadBus.State, vm: MainViewModel) {
     val running = dl is DownloadBus.State.Running || dl is DownloadBus.State.Preparing
 
     if (running) {
@@ -201,13 +184,13 @@ private fun DownloadSection(
             modifier = Modifier.fillMaxWidth().height(8.dp),
         )
         Text(
-            if (dl is DownloadBus.State.Preparing) "جارٍ التحضير…"
-            else "جارٍ التحميل… ${percent.toInt()}%",
+            if (dl is DownloadBus.State.Preparing) "Preparing…"
+            else "Downloading… ${percent.toInt()}%",
             fontSize = 13.sp,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
         OutlinedButton(onClick = vm::cancel, modifier = Modifier.fillMaxWidth()) {
-            Text("إلغاء")
+            Text("Cancel")
         }
     } else {
         Button(
@@ -216,21 +199,15 @@ private fun DownloadSection(
         ) {
             Icon(Icons.Default.Download, null)
             Spacer(Modifier.size(8.dp))
-            Text("تحميل", fontSize = 16.sp)
+            Text("Download", fontSize = 16.sp)
         }
     }
 
     when (dl) {
-        is DownloadBus.State.Success -> {
-            Text(
-                "تم الحفظ ✓  ${dl.savedPath}",
-                color = MaterialTheme.colorScheme.primary,
-                fontSize = 13.sp,
-            )
-        }
-        is DownloadBus.State.Error -> {
+        is DownloadBus.State.Success ->
+            Text("Saved ✓  ${dl.savedPath}", color = MaterialTheme.colorScheme.primary, fontSize = 13.sp)
+        is DownloadBus.State.Error ->
             Text(dl.message, color = MaterialTheme.colorScheme.error, fontSize = 13.sp)
-        }
         else -> {}
     }
 }

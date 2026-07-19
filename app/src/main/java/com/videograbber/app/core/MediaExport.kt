@@ -46,16 +46,10 @@ object MediaExport {
                 file.delete()
                 "Downloads/VideoGrabber/$displayName"
             } else {
-                val dest = File(
-                    Environment.getExternalStoragePublicDirectory(
-                        Environment.DIRECTORY_DOWNLOADS
-                    ),
-                    "VideoGrabber"
-                ).apply { mkdirs() }
-                val target = File(dest, displayName)
-                file.copyTo(target, overwrite = true)
-                file.delete()
-                target.absolutePath
+                // API < 29: keep the file in app-specific storage (no storage
+                // permission needed). The in-app Library lists it and shares it
+                // via FileProvider.
+                file.absolutePath
             }
         }
 }

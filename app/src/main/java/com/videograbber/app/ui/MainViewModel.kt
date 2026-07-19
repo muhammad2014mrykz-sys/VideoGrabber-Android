@@ -23,7 +23,7 @@ data class UiState(
     val thumbnail: String? = null,
     val platform: String = "",
     val directStream: Boolean = false, // Kwai etc. — no quality menu
-    val qualities: List<QualityOption> = listOf(QualityOption("الأعلى تلقائياً", 0)),
+    val qualities: List<QualityOption> = listOf(QualityOption("Best (auto)", 0)),
     val selectedQuality: Int = 0,      // index into qualities
     val audioOnly: Boolean = false,
     val error: String? = null,
@@ -58,8 +58,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         if (KwaiExtractor.isKwai(url)) {
             _ui.value = _ui.value.copy(
                 url = url, fetching = false, hasInfo = false,
-                error = "كواي غير مدعوم حالياً في هذا الإصدار (نعمل عليه). " +
-                    "جرّب يوتيوب، تيك توك، تويتر، فيسبوك أو إنستجرام.",
+                error = "Kwai isn't supported yet (its site hides videos behind a " +
+                    "browser-only API). Try YouTube, TikTok, Twitter, Facebook or Instagram.",
             )
             return
         }
@@ -68,7 +68,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             try {
                 val info = Downloader.getInfo(getApplication(), url)
                 val options = buildList {
-                    add(QualityOption("الأعلى تلقائياً", 0))
+                    add(QualityOption("Best (auto)", 0))
                     info.heights.forEach { h ->
                         val tag = when {
                             h >= 2160 -> " (4K)"
@@ -133,14 +133,14 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         val m = (msg ?: "").lowercase()
         val hint = when {
             "private" in m || "login" in m || "sign in" in m ->
-                "هذا المحتوى خاص أو يتطلب تسجيل دخول."
+                "This content is private or requires sign-in."
             "unsupported url" in m || "unable to extract" in m ->
-                "الرابط غير مدعوم أو لا يحتوي فيديو مباشر."
-            "unavailable" in m -> "الفيديو غير متاح."
-            else -> "تعذّر جلب المعلومات — تأكد من الرابط والاتصال."
+                "This link isn't supported or has no direct video."
+            "unavailable" in m -> "The video is unavailable."
+            else -> "Couldn't fetch info — check the link and your connection."
         }
         // Surface the real underlying error too, so problems are diagnosable.
         val detail = msg?.trim()?.takeIf { it.isNotEmpty() }?.take(300)
-        return if (detail != null) "$hint\n\nالتفاصيل:\n$detail" else hint
+        return if (detail != null) "$hint\n\nDetails:\n$detail" else hint
     }
 }

@@ -67,7 +67,7 @@ object Downloader {
             // behind a signed, browser-only API — WebView capture unreliable).
             // KwaiExtractor / KwaiWebExtractor are kept for future re-enable.
             if (KwaiExtractor.isKwai(url)) {
-                throw RuntimeException("كواي غير مدعوم حالياً في هذا الإصدار.")
+                throw RuntimeException("Kwai isn't supported yet.")
             }
             ensureReady(context)
             val request = YoutubeDLRequest(url).apply {
@@ -107,7 +107,7 @@ object Downloader {
     ): File = withContext(Dispatchers.IO) {
         // Kwai temporarily disabled (see getInfo).
         if (KwaiExtractor.isKwai(options.url)) {
-            throw RuntimeException("كواي غير مدعوم حالياً في هذا الإصدار.")
+            throw RuntimeException("Kwai isn't supported yet.")
         }
 
         ensureReady(context)
