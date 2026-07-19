@@ -34,14 +34,17 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import android.content.Intent
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import coil.compose.AsyncImage
+import com.videograbber.app.KwaiCaptureActivity
 import com.videograbber.app.core.DownloadBus
 import com.videograbber.app.core.LinkResolver
 
@@ -51,6 +54,20 @@ fun MainScreen(vm: MainViewModel) {
     val ui by vm.ui.collectAsStateWithLifecycle()
     val dl by vm.download.collectAsStateWithLifecycle()
     val clipboard = LocalClipboardManager.current
+    val context = LocalContext.current
+
+    val onDownload: () -> Unit = {
+        if (ui.directStream) {
+            // Kwai: capture the real video in a visible WebView (its site loads
+            // the video via a browser-only API), then download it.
+            context.startActivity(
+                Intent(context, KwaiCaptureActivity::class.java)
+                    .putExtra(KwaiCaptureActivity.EXTRA_URL, ui.url)
+            )
+        } else {
+            vm.startDownload()
+        }
+    }
 
     Column(
         modifier = Modifier
@@ -168,14 +185,23 @@ fun MainScreen(vm: MainViewModel) {
                 }
             }
 
-            DownloadSection(dl = dl, vm = vm)
+            DownloadSection(dl = dl, directStream = ui.directStream,
+                onDownload = onDownload, onCancel = vm::cancel)
         }
     }
 }
 
 @Composable
-private fun DownloadSection(dl: DownloadBus.State, vm: MainViewModel) {
-    val running = dl is DownloadBus.State.Running || dl is DownloadBus.State.Preparing
+private fun DownloadSection(
+    dl: DownloadBus.State,
+    directStream: Boolean,
+    onDownload: () -> Unit,
+    onCancel: () -> Unit,
+) {
+    // For Kwai (directStream) the download runs in a separate capture screen,
+    // so the shared DownloadBus progress doesn't apply here.
+    val running = !directStream &&
+        (dl is DownloadBus.State.Running || dl is DownloadBus.State.Preparing)
 
     if (running) {
         val percent = (dl as? DownloadBus.State.Running)?.percent ?: 0f
@@ -189,12 +215,12 @@ private fun DownloadSection(dl: DownloadBus.State, vm: MainViewModel) {
             fontSize = 13.sp,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
-        OutlinedButton(onClick = vm::cancel, modifier = Modifier.fillMaxWidth()) {
+        OutlinedButton(onClick = onCancel, modifier = Modifier.fillMaxWidth()) {
             Text("Cancel")
         }
     } else {
         Button(
-            onClick = vm::startDownload,
+            onClick = onDownload,
             modifier = Modifier.fillMaxWidth().height(52.dp),
         ) {
             Icon(Icons.Default.Download, null)

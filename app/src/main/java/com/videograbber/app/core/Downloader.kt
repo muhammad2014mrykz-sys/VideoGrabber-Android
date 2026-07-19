@@ -63,11 +63,17 @@ object Downloader {
     /** Probe a URL for title, thumbnail and available formats. */
     suspend fun getInfo(context: Context, url: String): MediaInfo =
         withContext(Dispatchers.IO) {
-            // Kwai temporarily disabled (its international site hides the video
-            // behind a signed, browser-only API — WebView capture unreliable).
-            // KwaiExtractor / KwaiWebExtractor are kept for future re-enable.
+            // Kwai: yt-dlp can't extract it. Probe (via HTTP redirect) for the
+            // canonical page + ids; the actual download is a visible-WebView
+            // capture (KwaiCaptureActivity), routed from the UI.
             if (KwaiExtractor.isKwai(url)) {
-                throw RuntimeException("Kwai isn't supported yet.")
+                val meta = KwaiExtractor.probe(url)
+                return@withContext MediaInfo(
+                    title = meta.title,
+                    thumbnail = meta.thumbnail,
+                    heights = emptyList(),
+                    directStream = true,
+                )
             }
             ensureReady(context)
             val request = YoutubeDLRequest(url).apply {

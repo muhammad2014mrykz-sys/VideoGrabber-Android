@@ -2,6 +2,7 @@ package com.videograbber.app.core
 
 import android.content.Context
 import android.os.Environment
+import android.util.Base64
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.io.File
@@ -12,11 +13,12 @@ import java.util.zip.GZIPInputStream
 /**
  * Kwai extractor.
  *
- * yt-dlp can't do Kwai, and Kwai's international site hides the real video
- * behind a signed API — the share page HTML is only a recommendation feed.
- * So the actual video URL is captured by rendering the page in a WebView
- * (see [KwaiWebExtractor]); this module resolves the share link to its
- * canonical page + ids, drives the WebView, and streams the resulting mp4.
+ * yt-dlp can't do Kwai, and Kwai's international share page HTML is only a
+ * recommendation feed — the requested video's mp4 is fetched client-side via a
+ * signed, browser-only API. So the real video URL is captured by rendering the
+ * page in a visible WebView (see KwaiCaptureActivity). This module resolves the
+ * share link to its canonical page + ids, identifies the correct CDN mp4 (by
+ * the userId encoded in the filename), and streams/saves it.
  */
 object KwaiExtractor {
 
@@ -50,39 +52,49 @@ object KwaiExtractor {
         val photoId = Regex("[?&]photoId=(\\d+)").find(finalUrl)?.groupValues?.get(1)
             ?: Regex("/video/(\\d+)").find(finalUrl)?.groupValues?.get(1)
         val userId = Regex("[?&]userId=(\\d+)").find(finalUrl)?.groupValues?.get(1)
-        val ogTitle = Regex("property=\"og:title\"\\s+content=\"([^\"]*)\"")
-            .find(html)?.groupValues?.get(1)?.let { decodeHtml(it).trim() }
         val ogImage = Regex("property=\"og:image\"\\s+content=\"([^\"]*)\"")
             .find(html)?.groupValues?.get(1)?.let { decodeHtml(it) }
         KwaiMeta(
             canonicalUrl = finalUrl,
             photoId = photoId,
             userId = userId,
-            title = "فيديو كواي" + (photoId?.let { " • $it" } ?: ""),
+            title = "Kwai video" + (photoId?.let { " • $it" } ?: ""),
             thumbnail = ogImage,
         )
     }
 
-    /** Resolve the correct video (via WebView) and stream it to a file. */
-    suspend fun download(
-        context: Context,
-        url: String,
-        onProgress: (Float, String) -> Unit,
-        isCancelled: () -> Boolean,
-    ): File {
-        val meta = probe(url)
-        onProgress(0f, "kwai: resolving")
-        val mp4 = KwaiWebExtractor.resolveMp4(context, meta.canonicalUrl, meta.userId)
+    /** Does this look like a Kwai CDN video request? */
+    fun isKwaiMp4(url: String): Boolean {
+        val u = url.lowercase()
+        return ".mp4" in u && ("kwai" in u || "oskwai" in u || "kwaidc" in u)
+    }
 
-        return withContext(Dispatchers.IO) {
-            val outDir = File(
-                context.getExternalFilesDir(Environment.DIRECTORY_MOVIES), "VideoGrabber"
-            ).apply { mkdirs() }
-            val id = meta.photoId ?: System.currentTimeMillis().toString()
-            val file = File(outDir, "kwai_$id.mp4")
-            streamTo(mp4, meta.canonicalUrl, file, onProgress, isCancelled)
-            file
+    /** Kwai mp4 filenames base64-encode "{ts}_{userId}_{photoId}_..." — pull userId. */
+    fun userIdOf(url: String): String {
+        val m = Regex("/B([A-Za-z0-9=]+?)_(?:sl|b_)").find(url) ?: return ""
+        val b64 = m.groupValues[1]
+        val padded = b64 + "=".repeat((4 - b64.length % 4) % 4)
+        return try {
+            String(Base64.decode(padded, Base64.DEFAULT)).split("_").getOrNull(1) ?: ""
+        } catch (e: Exception) {
+            ""
         }
+    }
+
+    /** Stream a captured mp4 to storage and publish it to the Downloads library. */
+    suspend fun streamAndSave(
+        context: Context,
+        mp4Url: String,
+        referer: String,
+        photoId: String?,
+        onProgress: (Float) -> Unit,
+    ): String = withContext(Dispatchers.IO) {
+        val outDir = File(
+            context.getExternalFilesDir(Environment.DIRECTORY_MOVIES), "VideoGrabber"
+        ).apply { mkdirs() }
+        val tmp = File(outDir, "kwai_${photoId ?: System.currentTimeMillis()}.mp4")
+        streamTo(mp4Url, referer, tmp, { pct, _ -> onProgress(pct) }) { false }
+        MediaExport.publishToDownloads(context, tmp)
     }
 
     // -- networking helpers ---------------------------------------------- //
@@ -113,7 +125,7 @@ object KwaiExtractor {
         val conn = open(mp4Url, referer)
         try {
             val code = conn.responseCode
-            if (code !in 200..299) throw RuntimeException("خطأ تحميل كواي (HTTP $code)")
+            if (code !in 200..299) throw RuntimeException("Kwai download error (HTTP $code)")
             val total = conn.contentLengthLong
             conn.inputStream.use { input ->
                 file.outputStream().use { output ->
