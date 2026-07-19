@@ -41,14 +41,8 @@ jobs:
           mkdir -p out
           cp app/build/outputs/apk/debug/app-debug.apk out/VideoGrabber.apk
 
-      - name: Upload APK artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: VideoGrabber-APK
-          path: out/VideoGrabber.apk
-          if-no-files-found: error
-
-      # Also publish the APK to a GitHub Release so it has a stable download link.
+      # We publish only to the "latest" Release (a single, overwritten APK) —
+      # no per-run upload-artifact, which would otherwise pile up ~206MB each run.
       - name: Publish to Release
         if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master'
         uses: softprops/action-gh-release@v2
