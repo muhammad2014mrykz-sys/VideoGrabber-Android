@@ -1,6 +1,7 @@
 package com.videograbber.app
 
 import android.annotation.SuppressLint
+import android.graphics.Bitmap
 import android.graphics.Color
 import android.os.Bundle
 import android.view.Gravity
@@ -28,11 +29,11 @@ import java.util.Collections
 /**
  * Visible browser capture for Kwai and unsupported public sites.
  *
- * Accuracy rule: the app never guesses which feed item is wanted. The user
- * first makes the desired video visible/playing and explicitly confirms it.
- * Only then is the current video source (or the most recently requested MP4)
- * downloaded. DRM/blob-only streams are rejected instead of saving the wrong
- * content.
+ * Kwai may replace an unavailable shared video with a recommendation feed.
+ * The share redirect exposes the requested numeric userId/photoId, while every
+ * Kwai CDN filename encodes its owner's userId. We only retain media whose
+ * encoded owner matches the share target. A recommendation is therefore
+ * rejected rather than silently saved as the requested video.
  */
 class KwaiCaptureActivity : ComponentActivity() {
 
@@ -43,6 +44,12 @@ class KwaiCaptureActivity : ComponentActivity() {
     private lateinit var captureButton: Button
     private val candidates = Collections.synchronizedList(mutableListOf<Candidate>())
 
+    @Volatile
+    private var expectedUserId: String? = null
+
+    @Volatile
+    private var expectedPhotoId: String? = null
+
     @SuppressLint("SetJavaScriptEnabled")
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -51,6 +58,7 @@ class KwaiCaptureActivity : ComponentActivity() {
             finish()
             return
         }
+        updateExpectedIdentity(inputUrl)
 
         webView = WebView(this).apply {
             settings.javaScriptEnabled = true
@@ -97,11 +105,19 @@ class KwaiCaptureActivity : ComponentActivity() {
                 view: WebView?,
                 request: WebResourceRequest?,
             ): WebResourceResponse? {
+                if (request?.isForMainFrame == true) {
+                    updateExpectedIdentity(request.url?.toString().orEmpty())
+                }
                 rememberCandidate(request?.url?.toString().orEmpty())
                 return null
             }
 
+            override fun onPageStarted(view: WebView?, url: String?, favicon: Bitmap?) {
+                updateExpectedIdentity(url.orEmpty())
+            }
+
             override fun onPageFinished(view: WebView?, url: String?) {
+                updateExpectedIdentity(url.orEmpty())
                 setStatus(INSTRUCTIONS)
             }
         }
@@ -111,6 +127,11 @@ class KwaiCaptureActivity : ComponentActivity() {
 
     private fun rememberCandidate(url: String) {
         if (!isDirectMp4(url)) return
+        val targetUser = expectedUserId
+        if (targetUser != null) {
+            val mediaUser = KwaiExtractor.userIdOf(url)
+            if (mediaUser.isBlank() || mediaUser != targetUser) return
+        }
         synchronized(candidates) {
             candidates.removeAll { it.url == url }
             candidates += Candidate(url, System.currentTimeMillis())
@@ -120,7 +141,8 @@ class KwaiCaptureActivity : ComponentActivity() {
 
     private fun captureVisibleVideo(originalUrl: String) {
         captureButton.isEnabled = false
-        setStatus("Checking the video currently visible…")
+        updateExpectedIdentity(webView.url.orEmpty())
+        setStatus("Checking the video currently visible...")
         webView.evaluateJavascript(CURRENT_VIDEO_JS) { encoded ->
             val current = runCatching {
                 JSONTokener(encoded).nextValue() as? String
@@ -129,42 +151,58 @@ class KwaiCaptureActivity : ComponentActivity() {
 
             val now = System.currentTimeMillis()
             val selected = when {
-                isDirectMp4(current) -> current
-                current.startsWith("blob:", ignoreCase = true) ->
-                    synchronized(candidates) {
-                        candidates.lastOrNull { now - it.seenAt <= 20_000 }?.url
-                    }
+                isVerifiedCandidate(current) -> current
                 else -> synchronized(candidates) {
-                    candidates.lastOrNull { now - it.seenAt <= 20_000 }?.url
+                    candidates.lastOrNull {
+                        now - it.seenAt <= 20_000 && isVerifiedCandidate(it.url)
+                    }?.url
                 }
             }
 
             if (selected == null) {
                 captureButton.isEnabled = true
-                setStatus(
+                val message = if (expectedUserId != null) {
+                    "The target video is unavailable on this page. Kwai only " +
+                        "returned recommendation videos, so nothing was downloaded."
+                } else {
                     "No downloadable MP4 was detected. Tap Play on the exact " +
-                        "video, wait a moment, then tap CAPTURE THIS VIDEO again.",
-                )
+                        "video, wait a moment, then tap CAPTURE THIS VIDEO again."
+                }
+                setStatus(message)
                 return@evaluateJavascript
             }
             downloadSelected(selected, originalUrl)
         }
     }
 
+    private fun isVerifiedCandidate(url: String): Boolean {
+        if (!isDirectMp4(url)) return false
+        val targetUser = expectedUserId ?: return true
+        return KwaiExtractor.userIdOf(url) == targetUser
+    }
+
     private fun downloadSelected(mediaUrl: String, referer: String) {
         captureButton.isEnabled = false
         lifecycleScope.launch {
             try {
-                setStatus("Downloading the confirmed video…")
-                val photoId = Regex("/video/(\\d+)").find(webView.url.orEmpty())
-                    ?.groupValues?.getOrNull(1)
+                val targetUser = expectedUserId
+                val mediaUser = KwaiExtractor.userIdOf(mediaUrl)
+                if (targetUser != null && mediaUser != targetUser) {
+                    throw IllegalStateException(
+                        "Kwai returned a recommendation instead of the target video",
+                    )
+                }
+                setStatus("Downloading the verified video...")
+                val photoId = expectedPhotoId
+                    ?: Regex("/video/(\\d+)").find(webView.url.orEmpty())
+                        ?.groupValues?.getOrNull(1)
                 val saved = KwaiExtractor.streamAndSave(
                     applicationContext,
                     mediaUrl,
                     referer,
                     photoId,
                 ) { progress ->
-                    setStatus("Downloading… ${progress.toInt().coerceIn(0, 100)}%")
+                    setStatus("Downloading... ${progress.toInt().coerceIn(0, 100)}%")
                 }
                 DownloadBus.update(DownloadBus.State.Success(saved))
                 Toast.makeText(
@@ -181,6 +219,23 @@ class KwaiCaptureActivity : ComponentActivity() {
                 )
             }
         }
+    }
+
+    private fun updateExpectedIdentity(url: String) {
+        if (url.isBlank()) return
+        val pathIdentity = Regex("/photo/(\\d{8,})/(\\d{12,})").find(url)
+        val userId = pathIdentity?.groupValues?.getOrNull(1)
+            ?: Regex("[?&]userId=(\\d{8,})", RegexOption.IGNORE_CASE)
+                .find(url)?.groupValues?.getOrNull(1)
+        val photoId = pathIdentity?.groupValues?.getOrNull(2)
+            ?: Regex(
+                "[?&](?:photoId|shareObjectId)=(\\d{12,})",
+                RegexOption.IGNORE_CASE,
+            ).find(url)?.groupValues?.getOrNull(1)
+            ?: Regex("/(?:video|photo)/(\\d{12,})")
+                .find(url)?.groupValues?.getOrNull(1)
+        if (userId != null) expectedUserId = userId
+        if (photoId != null) expectedPhotoId = photoId
     }
 
     private fun isDirectMp4(url: String): Boolean {
@@ -210,7 +265,7 @@ class KwaiCaptureActivity : ComponentActivity() {
                 "(KHTML, like Gecko) Chrome/126.0.0.0 Mobile Safari/537.36"
         private const val INSTRUCTIONS =
             "1. Make sure the exact video you want is visible.\n" +
-                "2. Tap Play and wait 2–3 seconds.\n" +
+                "2. Tap Play and wait 2-3 seconds.\n" +
                 "3. Tap CAPTURE THIS VIDEO below."
         private const val CURRENT_VIDEO_JS =
             "(function(){" +
