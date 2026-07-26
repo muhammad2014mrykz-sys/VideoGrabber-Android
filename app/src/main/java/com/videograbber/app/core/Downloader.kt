@@ -13,27 +13,26 @@ import kotlinx.coroutines.withContext
 import java.io.File
 import java.util.concurrent.atomic.AtomicBoolean
 
-/**
- * UI-agnostic wrapper around youtubedl-android (bundled yt-dlp + ffmpeg).
- * Handles engine init, metadata probing, and downloading with progress.
- */
-/** Platform-neutral probe result (works for both yt-dlp and the Kwai path). */
 data class MediaInfo(
     val title: String,
     val thumbnail: String?,
-    val heights: List<Int>,     // available video heights; empty = single/best only
-    val directStream: Boolean,  // e.g. Kwai — custom downloader, no quality choice
+    val heights: List<Int>,
+    /** True when the visible browser-capture workflow must be used. */
+    val directStream: Boolean,
 )
 
+/** Stable wrapper around the maintained youtubedl-android distribution. */
 object Downloader {
 
     private val initialized = AtomicBoolean(false)
-    private val updated = AtomicBoolean(false)
+    private val updateAttempted = AtomicBoolean(false)
     private val initMutex = Mutex()
     private val updateMutex = Mutex()
-    private val cancelledIds = java.util.Collections.synchronizedSet(mutableSetOf<String>())
 
-    /** Initialise the bundled python/yt-dlp/ffmpeg once. Idempotent. */
+    @Volatile
+    var engineUpdateWarning: String? = null
+        private set
+
     suspend fun ensureInit(context: Context) = withContext(Dispatchers.IO) {
         if (initialized.get()) return@withContext
         initMutex.withLock {
@@ -45,51 +44,45 @@ object Downloader {
     }
 
     /**
-     * Init + (once per app process) update yt-dlp to the latest release.
-     * The library's bundled yt-dlp is old; refreshing it is what keeps every
-     * platform working. Best-effort: if offline, we proceed with what we have.
-     * Concurrent callers wait here so the first probe uses the fresh engine.
+     * Update once per process. Failure is recorded rather than silently
+     * discarded; the bundled extractor remains usable while offline.
      */
     suspend fun ensureReady(context: Context) = withContext(Dispatchers.IO) {
         ensureInit(context)
-        if (updated.get()) return@withContext
+        if (updateAttempted.get()) return@withContext
         updateMutex.withLock {
-            if (updated.get()) return@withLock
-            runCatching { YoutubeDL.getInstance().updateYoutubeDL(context) }
-            updated.set(true)
+            if (updateAttempted.get()) return@withLock
+            val result = runCatching { YoutubeDL.getInstance().updateYoutubeDL(context) }
+            engineUpdateWarning = result.exceptionOrNull()?.message
+            updateAttempted.set(true)
         }
     }
 
-    /** Probe a URL for title, thumbnail and available formats. */
     suspend fun getInfo(context: Context, url: String): MediaInfo =
         withContext(Dispatchers.IO) {
-            // Kwai: yt-dlp can't extract it. Probe (via HTTP redirect) for the
-            // canonical page + ids; the actual download is a visible-WebView
-            // capture (KwaiCaptureActivity), routed from the UI.
             if (KwaiExtractor.isKwai(url)) {
-                val meta = KwaiExtractor.probe(url)
                 return@withContext MediaInfo(
-                    title = meta.title,
-                    thumbnail = meta.thumbnail,
+                    title = "Kwai Browser Capture",
+                    thumbnail = null,
                     heights = emptyList(),
                     directStream = true,
                 )
             }
+
             ensureReady(context)
             val request = YoutubeDLRequest(url).apply {
                 addOption("--no-playlist")
-                applyTikTokFix(url)
+                applyCommonOptions(url)
             }
             val info: VideoInfo = YoutubeDL.getInstance().getInfo(request)
-            val heights = info.formats
-                ?.mapNotNull { fmt -> val h: Int? = fmt.height; if (h != null && h > 0) h else null }
-                ?.distinct()
-                ?.sortedDescending()
-                .orEmpty()
             MediaInfo(
-                title = info.title ?: "video",
+                title = info.title ?: "Video",
                 thumbnail = info.thumbnail,
-                heights = heights,
+                heights = info.formats
+                    ?.mapNotNull { it.height.takeIf { height -> height > 0 } }
+                    ?.distinct()
+                    ?.sortedDescending()
+                    .orEmpty(),
                 directStream = false,
             )
         }
@@ -97,88 +90,77 @@ object Downloader {
     data class Options(
         val url: String,
         val audioOnly: Boolean,
-        /** null / 0 = best available; otherwise a max height cap (e.g. 1080). */
         val maxHeight: Int?,
     )
 
-    /**
-     * Download to the app's private movies dir and return the resulting file.
-     * onProgress(percent 0..100, statusLine) is called continuously.
-     */
     suspend fun download(
         context: Context,
         options: Options,
         processId: String,
         onProgress: (Float, String) -> Unit,
     ): File = withContext(Dispatchers.IO) {
-        // Kwai temporarily disabled (see getInfo).
-        if (KwaiExtractor.isKwai(options.url)) {
-            throw RuntimeException("Kwai isn't supported yet.")
+        require(!KwaiExtractor.isKwai(options.url)) {
+            "Kwai must be downloaded with Browser Capture."
         }
-
         ensureReady(context)
 
         val outDir = File(
             context.getExternalFilesDir(Environment.DIRECTORY_MOVIES),
-            "VideoGrabber"
+            "VideoGrabber",
         ).apply { mkdirs() }
-
-        val before = outDir.listFiles()?.toSet().orEmpty()
+        val before = outDir.listFiles()?.associateBy { it.absolutePath }.orEmpty()
 
         val request = YoutubeDLRequest(options.url).apply {
             addOption("--no-playlist")
-            applyTikTokFix(options.url)
+            applyCommonOptions(options.url)
             addOption("-o", File(outDir, "%(title).100B [%(id)s].%(ext)s").absolutePath)
             addOption("--no-mtime")
-            addOption("-R", "10")               // retries
             if (options.audioOnly) {
-                addOption("-x")                 // extract audio
+                addOption("-x")
                 addOption("--audio-format", "mp3")
                 addOption("--audio-quality", "0")
             } else {
-                val h = options.maxHeight
-                val fmt = if (h != null && h > 0) {
-                    "bestvideo[height<=?$h]+bestaudio/best[height<=?$h]/best"
+                val height = options.maxHeight
+                val format = if (height != null && height > 0) {
+                    "bestvideo[height<=?$height]+bestaudio/best[height<=?$height]/best"
                 } else {
                     "bestvideo*+bestaudio/best"
                 }
-                addOption("-f", fmt)
+                addOption("-f", format)
                 addOption("--merge-output-format", "mp4")
             }
         }
 
         YoutubeDL.getInstance().execute(request, processId) { progress, _, line ->
-            onProgress(progress, line)
+            onProgress(progress.coerceIn(0f, 100f), line)
         }
 
-        // The freshly created file is whatever appeared in the dir.
-        val after = outDir.listFiles()?.toList().orEmpty()
-        after.filter { it !in before }
+        val after = outDir.listFiles()?.filter { it.isFile }.orEmpty()
+        after.filter { it.absolutePath !in before }
             .maxByOrNull { it.lastModified() }
-            ?: after.maxByOrNull { it.lastModified() }
-            ?: throw IllegalStateException("no output file produced")
+            ?: throw IllegalStateException("The downloader produced no output file.")
     }
 
     fun cancel(processId: String) {
-        cancelledIds.add(processId)   // signals the Kwai stream to stop
         runCatching { YoutubeDL.getInstance().destroyProcessById(processId) }
     }
 
-    /**
-     * TikTok's WEB extractor now requires browser impersonation (curl_cffi),
-     * which youtubedl-android doesn't provide — hence "Unable to extract
-     * universal data / no impersonate target". Forcing an app-API hostname
-     * makes yt-dlp use TikTok's mobile API path, which needs no impersonation.
-     * Verified working. Harmless for non-TikTok URLs.
-     */
-    private fun YoutubeDLRequest.applyTikTokFix(url: String) {
-        if ("tiktok" in url.lowercase()) {
-            // app_info forces the mobile-API path (required by current+future
-            // yt-dlp per PR #9938); api_hostname pins a working host. The iid is
-            // a non-secret stable install id. Both verified working.
-            addOption("--extractor-args",
+    private fun YoutubeDLRequest.applyCommonOptions(url: String) {
+        addOption("--socket-timeout", "30")
+        addOption("--retries", "10")
+        addOption("--fragment-retries", "10")
+        addOption("--file-access-retries", "5")
+        addOption("--remote-components", "ejs:github")
+
+        val lower = url.lowercase()
+        if ("tiktok.com" in lower) {
+            // Forces TikTok's mobile API, avoiding curl_cffi browser
+            // impersonation, which is unavailable in youtubedl-android.
+            addOption(
+                "--extractor-args",
                 "tiktok:app_info=7318518857994389254;" +
-                    "api_hostname=api22-normal-c-useast2a.tiktokv.com")
+                    "api_hostname=api22-normal-c-useast2a.tiktokv.com",
+            )
         }
     }
 }

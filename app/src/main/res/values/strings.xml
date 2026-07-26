@@ -2,7 +2,7 @@
     <string name="app_name">VideoGrabber</string>
     <string name="tab_download">Download</string>
     <string name="tab_library">Library</string>
-    <string name="subtitle">Download from any platform — YouTube, TikTok, Twitter, Facebook, Instagram and more</string>
+    <string name="subtitle">YouTube, TikTok, Likee, X, Facebook, Instagram, Kwai capture and more</string>
     <string name="url_hint">Paste a video link here…</string>
     <string name="paste">Paste</string>
     <string name="fetch">Get info</string>

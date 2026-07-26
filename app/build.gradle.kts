@@ -12,8 +12,8 @@ android {
         applicationId = "com.videograbber.app"
         minSdk = 24
         targetSdk = 34
-        versionCode = 1
-        versionName = "1.0"
+        versionCode = 14
+        versionName = "1.4.0"
         // youtubedl-android ships native libs for these ABIs; a universal APK
         // that includes them all runs on any Android phone.
         ndk {
@@ -87,4 +87,6 @@ dependencies {
 
     // --- coroutines ---
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.1")
+
+    testImplementation("junit:junit:4.13.2")
 }

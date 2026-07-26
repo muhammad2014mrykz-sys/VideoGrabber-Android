@@ -92,7 +92,7 @@ object KwaiExtractor {
         val outDir = File(
             context.getExternalFilesDir(Environment.DIRECTORY_MOVIES), "VideoGrabber"
         ).apply { mkdirs() }
-        val tmp = File(outDir, "kwai_${photoId ?: System.currentTimeMillis()}.mp4")
+        val tmp = File(outDir, "captured_${photoId ?: System.currentTimeMillis()}.mp4")
         streamTo(mp4Url, referer, tmp, { pct, _ -> onProgress(pct) }) { false }
         MediaExport.publishToDownloads(context, tmp)
     }

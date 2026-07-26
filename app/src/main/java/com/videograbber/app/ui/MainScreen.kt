@@ -77,13 +77,13 @@ fun MainScreen(vm: MainViewModel) {
         verticalArrangement = Arrangement.spacedBy(14.dp),
     ) {
         Text(
-            "Download from any platform",
+            "Universal video downloader",
             fontSize = 20.sp,
             fontWeight = FontWeight.SemiBold,
             color = MaterialTheme.colorScheme.onBackground,
         )
         Text(
-            "YouTube, TikTok, Twitter, Facebook, Instagram and more.",
+            "YouTube, TikTok, Likee, X, Facebook, Instagram, Kwai capture and more.",
             fontSize = 13.sp,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
