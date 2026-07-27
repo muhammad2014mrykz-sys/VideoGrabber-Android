@@ -33,6 +33,19 @@ class LinkResolverTest {
     }
 
     @Test
+    fun selectsVideoWhenArabicShareTextContainsSeveralLinks() {
+        assertEquals(
+            "https://k.kwai.com/p/eYhACn6G",
+            LinkResolver.clean(
+                "من يرغب في الرقص؟ 🤣\n" +
+                    "https://play.google.com/store/apps/details?id=com.kwai.video\n" +
+                    "https://k.kwai.com/p/eYhACn6G\n" +
+                    "https://www.kwai.com/",
+            ),
+        )
+    }
+
+    @Test
     fun removesInvisibleBidiControls() {
         assertEquals(
             "https://vt.tiktok.com/ZSabc/",

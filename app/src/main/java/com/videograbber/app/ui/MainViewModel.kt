@@ -36,7 +36,14 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     val download: StateFlow<DownloadBus.State> = DownloadBus.state
 
     fun onUrlChange(value: String) {
-        mutableUi.value = mutableUi.value.copy(url = value)
+        mutableUi.value = mutableUi.value.copy(
+            url = value,
+            hasInfo = false,
+            title = null,
+            thumbnail = null,
+            directStream = false,
+            error = null,
+        )
     }
 
     fun setAudioOnly(value: Boolean) {
@@ -97,8 +104,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                         qualities = listOf(QualityOption("Original stream", 0)),
                         selectedQuality = 0,
                         error = "Automatic extraction is unavailable for this link. " +
-                            "Browser Capture can save a public direct MP4 after you play " +
-                            "and confirm the exact video. DRM-protected media is not supported.",
+                            "Open Browser Capture, play the exact public video, then confirm it. " +
+                            "Private, paid and DRM-protected media is not supported.",
                     )
                 } else {
                     mutableUi.value = mutableUi.value.copy(
@@ -151,7 +158,12 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         val lower = message.lowercase()
         val host = runCatching { java.net.URI(url).host.orEmpty().lowercase() }
             .getOrDefault("")
+        if (Downloader.isProtectedContent(message) || "drm" in lower) return false
+        if ("youtu" in host || "tiktok" in host) return false
         return "likee" in host ||
+            "like-video" in host ||
+            "instagram" in host ||
+            "kwai" in host ||
             "unsupported url" in lower ||
             "unable to extract" in lower ||
             "no video formats" in lower ||
@@ -161,6 +173,12 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     private fun friendlyError(message: String): String {
         val lower = message.lowercase()
         val hint = when {
+            "members-only" in lower ||
+                "channel's members" in lower ||
+                "join this channel" in lower ->
+                "This is a paid members-only video. A valid membership is required."
+            "purchase" in lower || "rent this" in lower || "requires payment" in lower ->
+                "This is paid content and requires authorized access."
             "private" in lower || "login" in lower || "sign in" in lower ->
                 "This content is private or requires sign-in."
             "drm" in lower -> "This video is DRM-protected and cannot be downloaded."

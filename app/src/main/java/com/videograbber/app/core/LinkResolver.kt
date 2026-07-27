@@ -17,7 +17,7 @@ object LinkResolver {
         "(?<![\\w@.])((?:[a-z0-9-]+\\.)+[a-z]{2,}/[^\\s<>\"'\\\\]+)",
         RegexOption.IGNORE_CASE,
     )
-    private val trailing = ".,،؛:;!?؟)]}\"'»«".toSet()
+    private val trailing = ".,،؛:;!?؟)]}\"'»«…".toSet()
     private val trackingKeys = setOf(
         "utm_source", "utm_medium", "utm_campaign", "utm_term", "utm_content",
         "fbclid", "igshid", "igsh", "gclid", "mibextid", "si", "feature",
@@ -28,7 +28,7 @@ object LinkResolver {
     )
     private val videoHosts = listOf(
         "kwai.com", "kwai.net", "kwaiapps.com", "kuaishou", "gifshow.com",
-        "likee.video", "like-video.com",
+        "likee.video", "likee.com", "like-video.com",
         "youtube.com", "youtu.be", "tiktok.com",
         "instagram.com", "instagr.am", "facebook.com", "fb.watch", "fb.com",
         "twitter.com", "x.com", "t.co", "snapchat.com",

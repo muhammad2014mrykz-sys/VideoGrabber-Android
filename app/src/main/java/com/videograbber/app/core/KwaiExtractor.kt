@@ -69,17 +69,22 @@ object KwaiExtractor {
         return ".mp4" in u && ("kwai" in u || "oskwai" in u || "kwaidc" in u)
     }
 
-    /** Kwai mp4 filenames base64-encode "{ts}_{userId}_{photoId}_..." — pull userId. */
-    fun userIdOf(url: String): String {
-        val m = Regex("/B([A-Za-z0-9=]+?)_(?:sl|b_)").find(url) ?: return ""
+    /** Kwai mp4 filenames base64-encode "{ts}_{userId}_{photoId}_...". */
+    private fun encodedIdentity(url: String): List<String> {
+        val m = Regex("/B([A-Za-z0-9=]+?)_(?:sl|b_)").find(url)
+            ?: return emptyList()
         val b64 = m.groupValues[1]
         val padded = b64 + "=".repeat((4 - b64.length % 4) % 4)
         return try {
-            String(Base64.decode(padded, Base64.DEFAULT)).split("_").getOrNull(1) ?: ""
+            String(Base64.decode(padded, Base64.DEFAULT)).split("_")
         } catch (e: Exception) {
-            ""
+            emptyList()
         }
     }
+
+    fun userIdOf(url: String): String = encodedIdentity(url).getOrNull(1).orEmpty()
+
+    fun photoIdOf(url: String): String = encodedIdentity(url).getOrNull(2).orEmpty()
 
     /** Stream a captured mp4 to storage and publish it to the Downloads library. */
     suspend fun streamAndSave(
@@ -87,26 +92,41 @@ object KwaiExtractor {
         mp4Url: String,
         referer: String,
         photoId: String?,
+        cookies: String?,
+        userAgent: String?,
         onProgress: (Float) -> Unit,
     ): String = withContext(Dispatchers.IO) {
         val outDir = File(
             context.getExternalFilesDir(Environment.DIRECTORY_MOVIES), "VideoGrabber"
         ).apply { mkdirs() }
         val tmp = File(outDir, "captured_${photoId ?: System.currentTimeMillis()}.mp4")
-        streamTo(mp4Url, referer, tmp, { pct, _ -> onProgress(pct) }) { false }
+        streamTo(
+            mp4Url,
+            referer,
+            cookies,
+            userAgent,
+            tmp,
+            { pct, _ -> onProgress(pct) },
+        ) { false }
         MediaExport.publishToDownloads(context, tmp)
     }
 
     // -- networking helpers ---------------------------------------------- //
-    private fun open(urlStr: String, referer: String?): HttpURLConnection {
+    private fun open(
+        urlStr: String,
+        referer: String?,
+        cookies: String? = null,
+        userAgent: String? = null,
+    ): HttpURLConnection {
         val conn = URL(urlStr).openConnection() as HttpURLConnection
         conn.instanceFollowRedirects = true
         conn.connectTimeout = 20000
         conn.readTimeout = 30000
-        conn.setRequestProperty("User-Agent", UA)
+        conn.setRequestProperty("User-Agent", userAgent?.takeIf { it.isNotBlank() } ?: UA)
         conn.setRequestProperty("Accept", "*/*")
         conn.setRequestProperty("Accept-Encoding", "gzip")
         if (referer != null) conn.setRequestProperty("Referer", referer)
+        if (!cookies.isNullOrBlank()) conn.setRequestProperty("Cookie", cookies)
         return conn
     }
 
@@ -119,13 +139,21 @@ object KwaiExtractor {
     }
 
     private fun streamTo(
-        mp4Url: String, referer: String, file: File,
+        mp4Url: String,
+        referer: String,
+        cookies: String?,
+        userAgent: String?,
+        file: File,
         onProgress: (Float, String) -> Unit, isCancelled: () -> Boolean,
     ) {
-        val conn = open(mp4Url, referer)
+        val conn = open(mp4Url, referer, cookies, userAgent)
         try {
+            conn.setRequestProperty("Accept-Encoding", "identity")
             val code = conn.responseCode
-            if (code !in 200..299) throw RuntimeException("Kwai download error (HTTP $code)")
+            if (code !in 200..299) throw RuntimeException("Media download error (HTTP $code)")
+            if (conn.contentType?.contains("text/html", ignoreCase = true) == true) {
+                throw RuntimeException("The media link returned a web page instead of a video")
+            }
             val total = conn.contentLengthLong
             conn.inputStream.use { input ->
                 file.outputStream().use { output ->

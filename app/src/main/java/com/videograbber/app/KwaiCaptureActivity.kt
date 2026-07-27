@@ -50,6 +50,9 @@ class KwaiCaptureActivity : ComponentActivity() {
     @Volatile
     private var expectedPhotoId: String? = null
 
+    @Volatile
+    private var kwaiMode: Boolean = false
+
     @SuppressLint("SetJavaScriptEnabled")
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -58,6 +61,7 @@ class KwaiCaptureActivity : ComponentActivity() {
             finish()
             return
         }
+        kwaiMode = KwaiExtractor.isKwai(inputUrl)
         updateExpectedIdentity(inputUrl)
 
         webView = WebView(this).apply {
@@ -127,11 +131,7 @@ class KwaiCaptureActivity : ComponentActivity() {
 
     private fun rememberCandidate(url: String) {
         if (!isDirectMp4(url)) return
-        val targetUser = expectedUserId
-        if (targetUser != null) {
-            val mediaUser = KwaiExtractor.userIdOf(url)
-            if (mediaUser.isBlank() || mediaUser != targetUser) return
-        }
+        if (!matchesExpectedKwaiIdentity(url)) return
         synchronized(candidates) {
             candidates.removeAll { it.url == url }
             candidates += Candidate(url, System.currentTimeMillis())
@@ -161,7 +161,7 @@ class KwaiCaptureActivity : ComponentActivity() {
 
             if (selected == null) {
                 captureButton.isEnabled = true
-                val message = if (expectedUserId != null) {
+                val message = if (kwaiMode && (expectedUserId != null || expectedPhotoId != null)) {
                     "The target video is unavailable on this page. Kwai only " +
                         "returned recommendation videos, so nothing was downloaded."
                 } else {
@@ -177,30 +177,43 @@ class KwaiCaptureActivity : ComponentActivity() {
 
     private fun isVerifiedCandidate(url: String): Boolean {
         if (!isDirectMp4(url)) return false
-        val targetUser = expectedUserId ?: return true
-        return KwaiExtractor.userIdOf(url) == targetUser
+        return matchesExpectedKwaiIdentity(url)
     }
 
-    private fun downloadSelected(mediaUrl: String, referer: String) {
+    private fun matchesExpectedKwaiIdentity(url: String): Boolean {
+        if (!kwaiMode) return true
+        expectedUserId?.let { expected ->
+            if (KwaiExtractor.userIdOf(url) != expected) return false
+        }
+        expectedPhotoId?.let { expected ->
+            if (KwaiExtractor.photoIdOf(url) != expected) return false
+        }
+        return expectedUserId != null || expectedPhotoId != null
+    }
+
+    private fun downloadSelected(mediaUrl: String, originalUrl: String) {
         captureButton.isEnabled = false
         lifecycleScope.launch {
             try {
-                val targetUser = expectedUserId
-                val mediaUser = KwaiExtractor.userIdOf(mediaUrl)
-                if (targetUser != null && mediaUser != targetUser) {
+                if (!matchesExpectedKwaiIdentity(mediaUrl)) {
                     throw IllegalStateException(
                         "Kwai returned a recommendation instead of the target video",
                     )
                 }
                 setStatus("Downloading the verified video...")
+                val pageUrl = webView.url?.takeIf { it.startsWith("http") } ?: originalUrl
+                val cookies = CookieManager.getInstance().getCookie(mediaUrl)
+                val userAgent = webView.settings.userAgentString
                 val photoId = expectedPhotoId
                     ?: Regex("/video/(\\d+)").find(webView.url.orEmpty())
                         ?.groupValues?.getOrNull(1)
                 val saved = KwaiExtractor.streamAndSave(
                     applicationContext,
                     mediaUrl,
-                    referer,
+                    pageUrl,
                     photoId,
+                    cookies,
+                    userAgent,
                 ) { progress ->
                     setStatus("Downloading... ${progress.toInt().coerceIn(0, 100)}%")
                 }
@@ -223,6 +236,8 @@ class KwaiCaptureActivity : ComponentActivity() {
 
     private fun updateExpectedIdentity(url: String) {
         if (url.isBlank()) return
+        if (KwaiExtractor.isKwai(url)) kwaiMode = true
+        if (!kwaiMode) return
         val pathIdentity = Regex("/photo/(\\d{8,})/(\\d{12,})").find(url)
         val userId = pathIdentity?.groupValues?.getOrNull(1)
             ?: Regex("[?&]userId=(\\d{8,})", RegexOption.IGNORE_CASE)
